@@ -1,0 +1,11 @@
+---
+- name: rebuild virtual domain
+  command: postmap /etc/postfix/virtual
+
+- name: rebuild aliases
+  command: postalias /etc/aliases
+
+- name: restart postfix
+  service:
+    name: postfix
+    state: restarted

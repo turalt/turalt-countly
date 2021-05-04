@@ -1,0 +1,7 @@
+---
+server_domain: '{{ansible_hostname}}'
+mail_hostname: '{{ansible_hostname}}'
+mail_fqdn: '{{ansible_fqdn}}'
+postfix_domain: 'analytics.turalt.com'
+postfix_delegate: 'stuart@morungos.com'
+relay_domain: 'turalt.com'

@@ -1,0 +1,28 @@
+---
+- name: install
+  apt: 
+    name:
+      - iptables-persistent 
+    update_cache: yes 
+    cache_valid_time: 3600 
+    state: present
+
+- name: remove 127.0.1.1 from /etc/hosts
+  lineinfile:
+    dest: "/etc/hosts"
+    state: absent
+    regexp: "^127.0.1.1"
+
+- name: copy iptables configuration
+  template:
+    src: "iptables.j2"
+    dest: "/etc/iptables.rules"
+  register: iptables_rules_written
+
+- name: load if a new iptables configuration was written 
+  shell: iptables-restore < /etc/iptables.rules
+  when: iptables_rules_written.changed
+
+- name: save if a new iptables configuration was written 
+  command: netfilter-persistent save
+  when: iptables_rules_written.changed

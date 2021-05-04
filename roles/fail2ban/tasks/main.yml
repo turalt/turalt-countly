@@ -1,0 +1,249 @@
+---
+- name: install
+  apt:
+    name:
+      - fail2ban
+    update_cache: yes
+    cache_valid_time: 3600
+    state: present
+
+## If this changes, we need to restart the whole of fail2ban but this is strange, 
+## it seems that we are simply copying jail.conf to jail.local, unless it exists. 
+## We should probably check to see if it happens and trigger the handler only if needed.
+##
+## Jails are separate. We don't need to restart the whole of fail2ban for them.
+
+- name: make a local configuration
+  shell: awk '{ print; }' /etc/fail2ban/jail.conf | tee /etc/fail2ban/jail.local creates=/etc/fail2ban/jail.local
+  notify:
+    - restart fail2ban
+
+
+## Without this setting here, it seems to fail. The setting is fixed to
+## normal in the filter file, and the override from the jail.local doesn't
+## make it through.
+- name: fix the sshd filter
+  ini_file:
+    dest: "/etc/fail2ban/filter.d/sshd.conf"
+    section: "{{item.section}}"
+    option: "{{item.option}}"
+    value: "{{item.value}}"
+  with_items:
+    - {section: 'Definition',        option: 'mode', value: 'extra'}
+
+
+- name: initialize the nginx-nohome filter
+  ini_file:
+    dest: "/etc/fail2ban/filter.d/nginx-nohome.conf"
+    section: "{{item.section}}"
+    option: "{{item.option}}"
+    value: "{{item.value}}"
+  with_items:
+    - {section: 'Definition',        option: 'failregex', value: 'nginx_\w+: <HOST> - - \"(GET|PUT|HEAD|POST)\s+\S*/~.*'}
+    - {section: 'Definition',        option: 'ignoreregex', value: ''}
+
+
+- name: initialize the nginx-noproxy filter
+  ini_file:
+    dest: "/etc/fail2ban/filter.d/nginx-noproxy.conf"
+    section: "{{item.section}}"
+    option: "{{item.option}}"
+    value: "{{item.value}}"
+  with_items:
+    - {section: 'Definition',        option: 'failregex', value: 'nginx_\w+: <HOST> - - \"(GET|PUT|HEAD|POST)\s+http'}
+    - {section: 'Definition',        option: 'ignoreregex', value: ''}
+
+
+- name: initialize the nginx-noscript filter
+  ini_file:
+    dest: "/etc/fail2ban/filter.d/nginx-noscript.conf"
+    section: "{{item.section}}"
+    option: "{{item.option}}"
+    value: "{{item.value}}"
+  with_items:
+    - {section: 'Definition',        option: 'failregex', value: 'nginx_\w+: <HOST> - - \"(GET|PUT|HEAD|POST)\s+\S*(\.jsp[afx]?|\.exe|\.dll|\.pl[x]?|\.cgi|\.scgi)\b'}
+    - {section: 'Definition',        option: 'ignoreregex', value: ''}
+
+
+- name: update the php-url-fopen filter to handle syslog
+  ini_file:
+    dest: "/etc/fail2ban/filter.d/php-url-fopen.conf"
+    section: "{{item.section}}"
+    option: "{{item.option}}"
+    value: "{{item.value}}"
+  with_items:
+    - {section: 'Definition',        option: 'failregex', value: 'nginx_\w+: <HOST> -.*"(GET|POST).*\?.*\=http\:\/\/.* HTTP\/.*$'}
+
+
+- name: update the nginx-botsearch filter to handle 444
+  ini_file:
+    dest: "/etc/fail2ban/filter.d/nginx-botsearch.conf"
+    section: "{{item.section}}"
+    option: "{{item.option}}"
+    value: "{{item.value}}"
+  with_items:
+    - {section: 'Definition',        option: 'failregex', value: 'nginx_\w+: <HOST> \- \S+ \"(GET|POST|HEAD) \/<block> \S+\" (404|444) .+$'}
+
+
+- name: update the nginx-limit-req filter to handle syslog
+  ini_file:
+    dest: "/etc/fail2ban/filter.d/nginx-limit-req.conf"
+    section: "{{item.section}}"
+    option: "{{item.option}}"
+    value: "{{item.value}}"
+  with_items:
+    - {section: 'Definition',        option: 'failregex', value: '\[[a-z]+\] \d+#\d+: \*\d+ limiting requests, excess: [\d\.]+ by zone "(?:%(ngx_limit_req_zones)s)", client: <HOST>'}
+
+
+## This is awkward. The logpath initial value has our friendly multi-line ini file value,
+## which we need to remove, but can't using the standard basic ansible logic.
+
+- name: remove blank line apache log references for all jails
+  lineinfile:
+    dest: /etc/fail2ban/jail.local
+    regexp: '^\s+%\(apache_\w+_log\)s'
+    state: absent
+  notify:
+    - reload fail2ban
+
+
+- name: configure the jail defaults
+  ini_file:
+    dest: "/etc/fail2ban/jail.local"
+    section: "{{item.section}}"
+    option: "{{item.option}}"
+    value: "{{item.value}}"
+  with_items:
+    - {section: 'DEFAULT',                   option: 'bantime', value: '{{fail2ban_ban_time}}'}
+    - {section: 'DEFAULT',                   option: 'findtime', value: '{{fail2ban_find_time}}'}
+    - {section: 'DEFAULT',                   option: 'action', value: '%(action_mwl)s'}
+    - {section: 'DEFAULT',                   option: 'mta', value: 'sendmail'}
+    - {section: 'DEFAULT',                   option: 'destemail', value: '{{postfix_delegate}}'}
+    - {section: 'DEFAULT',                   option: 'sender', value: 'fail2ban@{{ansible_hostname}}'}
+    - {section: 'DEFAULT',                   option: 'sendername', value: 'fail2ban'}
+    - {section: 'DEFAULT',                   option: 'ignoreip', value: '{{fail2ban_ignoreip}}'}
+    - {section: 'DEFAULT',                   option: 'nginx_access_log', value: '/var/log/syslog'}
+    - {section: 'DEFAULT',                   option: 'bantime.increment', value: 'true'}
+  notify:
+    - reload fail2ban
+
+
+- name: configure the ssh jail
+  ini_file:
+    dest: "/etc/fail2ban/jail.local"
+    section: "{{item.section}}"
+    option: "{{item.option}}"
+    value: "{{item.value}}"
+  with_items:
+    - {section: 'sshd',                      option: 'maxretry', value: '{{fail2ban_sshd_max_retry}}'}
+    - {section: 'sshd',                      option: 'mode', value: 'extra'}
+  notify:
+    - reload fail2ban
+
+
+- name: configure the nginx-nohome jail
+  ini_file:
+    dest: "/etc/fail2ban/jail.local"
+    section: "{{item.section}}"
+    option: "{{item.option}}"
+    value: "{{item.value}}"
+  with_items:
+    - {section: 'nginx-nohome',              option: 'enabled', value: 'true'}
+    - {section: 'nginx-nohome',              option: 'filter', value: 'nginx-nohome'}
+    - {section: 'nginx-nohome',              option: 'port', value: 'http,https'}
+    - {section: 'nginx-nohome',              option: 'logpath', value: '%(nginx_access_log)s'}
+    - {section: 'nginx-nohome',              option: 'findtime', value: '{{fail2ban_http_find_time}}'}
+    - {section: 'nginx-nohome',              option: 'bantime', value: '{{fail2ban_http_ban_time}}'}
+    - {section: 'nginx-nohome',              option: 'maxretry', value: '{{fail2ban_http_max_retry}}'}
+  notify:
+    - reload fail2ban
+
+
+- name: configure the noproxy jail
+  ini_file:
+    dest: "/etc/fail2ban/jail.local"
+    section: "{{item.section}}"
+    option: "{{item.option}}"
+    value: "{{item.value}}"
+  with_items:
+    - {section: 'nginx-noproxy',             option: 'enabled', value: 'true'}
+    - {section: 'nginx-noproxy',             option: 'filter', value: 'nginx-noproxy'}
+    - {section: 'nginx-noproxy',             option: 'port', value: 'http,https'}
+    - {section: 'nginx-noproxy',             option: 'logpath', value: '%(nginx_access_log)s'}
+    - {section: 'nginx-noproxy',             option: 'findtime', value: '{{fail2ban_http_find_time}}'}
+    - {section: 'nginx-noproxy',             option: 'bantime', value: '{{fail2ban_http_ban_time}}'}
+    - {section: 'nginx-noproxy',             option: 'maxretry', value: '{{fail2ban_http_max_retry}}'}
+  notify:
+    - reload fail2ban
+
+
+- name: configure the noscript jail
+  ini_file:
+    dest: "/etc/fail2ban/jail.local"
+    section: "{{item.section}}"
+    option: "{{item.option}}"
+    value: "{{item.value}}"
+  with_items:
+    - {section: 'nginx-noscript',            option: 'enabled', value: 'true'}
+    - {section: 'nginx-noscript',            option: 'filter', value: 'nginx-noscript'}
+    - {section: 'nginx-noscript',            option: 'port', value: 'http,https'}
+    - {section: 'nginx-noscript',            option: 'logpath', value: '%(nginx_access_log)s'}
+    - {section: 'nginx-noscript',            option: 'findtime', value: '{{fail2ban_http_find_time}}'}
+    - {section: 'nginx-noscript',            option: 'bantime', value: '{{fail2ban_http_ban_time}}'}
+    - {section: 'nginx-noscript',            option: 'maxretry', value: '{{fail2ban_http_max_retry}}'}
+  notify:
+    - reload fail2ban
+
+
+- name: configure the botsearch jail
+  ini_file:
+    dest: "/etc/fail2ban/jail.local"
+    section: "{{item.section}}"
+    option: "{{item.option}}"
+    value: "{{item.value}}"
+  with_items:
+    - {section: 'nginx-botsearch',           option: 'enabled', value: 'true'}
+    - {section: 'nginx-botsearch',           option: 'filter', value: 'nginx-botsearch'}
+    - {section: 'nginx-botsearch',           option: 'port', value: 'http,https'}
+    - {section: 'nginx-botsearch',           option: 'logpath', value: '%(nginx_access_log)s'}
+    - {section: 'nginx-botsearch',           option: 'findtime', value: '{{fail2ban_http_find_time}}'}
+    - {section: 'nginx-botsearch',           option: 'bantime', value: '{{fail2ban_http_ban_time}}'}
+    - {section: 'nginx-botsearch',           option: 'maxretry', value: '{{fail2ban_http_max_retry}}'}
+  notify:
+    - reload fail2ban
+
+
+- name: configure the limit-req jail
+  ini_file:
+    dest: "/etc/fail2ban/jail.local"
+    section: "{{item.section}}"
+    option: "{{item.option}}"
+    value: "{{item.value}}"
+  with_items:
+    - {section: 'nginx-limit-req',           option: 'enabled', value: 'true'}
+    - {section: 'nginx-limit-req',           option: 'filter', value: 'nginx-limit-req'}
+    - {section: 'nginx-limit-req',           option: 'port', value: 'http,https'}
+    - {section: 'nginx-limit-req',           option: 'logpath', value: '%(nginx_access_log)s'}
+    - {section: 'nginx-limit-req',           option: 'findtime', value: '{{fail2ban_http_find_time}}'}
+    - {section: 'nginx-limit-req',           option: 'bantime', value: '{{fail2ban_http_ban_time}}'}
+    - {section: 'nginx-limit-req',           option: 'maxretry', value: '{{fail2ban_http_max_retry}}'}
+  notify:
+    - reload fail2ban
+
+
+- name: configure the php-url-fopen jail
+  ini_file:
+    dest: "/etc/fail2ban/jail.local"
+    section: "{{item.section}}"
+    option: "{{item.option}}"
+    value: "{{item.value}}"
+  with_items:
+    - {section: 'php-url-fopen',             option: 'enabled', value: 'true'}
+    - {section: 'php-url-fopen',             option: 'filter', value: 'php-url-fopen'}
+    - {section: 'php-url-fopen',             option: 'port', value: 'http,https'}
+    - {section: 'php-url-fopen',             option: 'logpath', value: '%(nginx_access_log)s'}
+    - {section: 'php-url-fopen',             option: 'findtime', value: '{{fail2ban_http_find_time}}'}
+    - {section: 'php-url-fopen',             option: 'bantime', value: '{{fail2ban_http_ban_time}}'}
+    - {section: 'php-url-fopen',             option: 'maxretry', value: '{{fail2ban_http_max_retry}}'}
+  notify:
+    - reload fail2ban

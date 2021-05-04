@@ -1,0 +1,20 @@
+## The default site is more or less empty, and simply rejects and 
+## logs everything. This matches when we don't get a valid host. 
+## These are candidates for fail2ban, because we're here by IP alone.
+
+log_format default_access    '$remote_addr - $remote_user '
+                             '"$request" $status $body_bytes_sent $request_time '
+                             '"$http_referer" "$http_user_agent" "$request_body"';
+
+server {
+  listen         {{hostvars[inventory_hostname]['ansible_' + webserver_listen_interface]['ipv4']['address']}}:80 default_server;
+  server_name    _;
+
+  access_log  syslog:server=unix:/dev/log,tag=nginx_no_server,nohostname default_access;
+  error_log   syslog:server=unix:/dev/log,tag=nginx_no_server,nohostname;
+
+  location / {
+    return 444;
+  }
+}
+

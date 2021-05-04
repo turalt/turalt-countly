@@ -1,0 +1,66 @@
+---
+- name: install gpg and build-essential
+  apt: 
+    name:
+      - gpg
+      - build-essential 
+    update_cache: yes 
+    cache_valid_time: 3600
+    state: present
+
+- name: yarn apt key
+  apt_key:
+    id: 4F77679369475BAA
+    url: https://dl.yarnpkg.com/debian/pubkey.gpg
+    state: present
+
+- name: yarn apt repository
+  apt_repository:
+    filename: yarn
+    repo: "deb http://dl.yarnpkg.com/debian/ stable main"
+    state: present
+    update_cache: yes
+    
+- name: install yarn
+  apt: 
+    name:
+      - yarn
+    update_cache: yes 
+    cache_valid_time: 3600
+    state: present
+
+- name: prune any broken symbolic links
+  command: 'find -L . -type l -exec rm {} \;'
+
+- name: detecting node
+  stat:
+    path: "{{node_binary_directory}}/node"
+  register: found_local_node
+
+- name: get node version
+  shell: "{{node_binary_directory}}/node --version | grep -o -E '[0-9]+\\.[0-9]+\\.[0-9]+'"
+  changed_when: false
+  register: found_node_version
+  when: found_local_node.stat.exists == true
+
+## We set the install_node fact, which can be used by later roles to decide 
+## when node_modules and related stuff needs to be wiped. Because, here, we 
+## don't know where it is. 
+
+- debug:
+    var: found_local_node
+
+- debug:
+    var: found_node_version
+
+- set_fact:
+    existing_node: "{{found_local_node.stat.exists == true}}"
+    install_node: "{{found_local_node.stat.exists == false or found_node_version.stdout != node_version}}"
+
+- name: remove old node
+  import_tasks: 'remove-old.yml'
+  when: existing_node and install_node
+
+- name: install node
+  import_tasks: 'install.yml'
+  when: install_node

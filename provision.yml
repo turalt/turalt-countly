@@ -1,0 +1,26 @@
+---
+- hosts: all
+  become: True
+  tasks:
+    - name: 'setup'
+      setup:
+        filter: '*'
+
+- hosts: all
+  become: True
+  roles:
+    - role: node
+      tags: [ 'infrastructure' ]
+    - role: time
+      tags: [ 'networking' ]
+    - role: networking
+      tags: [ 'networking' ]
+    - role: fail2ban
+      tags: [ 'networking' ]
+    - role: mail
+      tags: [ 'infrastructure' ]
+
+    # - role: database
+    #   tags: [ 'infrastructure' ]
+    # - role: webserver
+    #   tags: [ 'application' ]

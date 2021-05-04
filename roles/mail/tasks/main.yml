@@ -1,0 +1,85 @@
+---
+- name: set postfix defaults
+  debconf:
+    name: 'postfix'
+    question: '{{item.question}}'
+    value: '{{item.value}}'
+    vtype: '{{item.type}}'
+  with_items:
+    - {question: 'postfix/mailname', value: '{{ mail_fqdn }}', type: 'string'}
+    - {question: 'postfix/main_mailer_type', value: 'Internet Site', type: 'select'}
+    - {question: 'postfix/destinations', value: '{{ mail_fqdn }}, localhost.localdomain, localhost', type: 'string'}
+
+- name: remove exim
+  apt:
+    name: 
+      - exim4
+      - sendmail
+      - sendmail-bin
+    state: absent
+    autoremove: yes
+
+- name: install
+  apt:
+    name:
+      - postfix
+      - mailutils
+    update_cache: yes
+    cache_valid_time: 3600
+    state: present
+
+- name: create /etc/mailname
+  copy:
+    content: "{{ mail_fqdn }}"
+    dest: "/etc/mailname"
+    owner: root
+    group: root
+    mode: 0644
+
+- name: configure postfix
+  lineinfile:
+    dest: /etc/postfix/main.cf
+    regexp: "{{item.pattern}}"
+    line: "{{item.line}}"
+    owner: root
+    group: root
+    mode: 0644
+  with_items:
+    - {pattern: '^myhostname\s*=', line: 'myhostname = {{ mail_fqdn }}'}
+    - {pattern: '^mynetworks\s*=', line: 'mynetworks = 127.0.0.0/8 [::ffff:127.0.0.0]/104 [::1]/128'}
+    - {pattern: '^myorigin\s*=', line: 'myorigin = /etc/mailname'}
+    - {pattern: '^relayhost\s*=', line: 'relayhost ='}
+    - {pattern: '^inet_interfaces\s*=', line: 'inet_interfaces = loopback-only'}
+    - {pattern: '^mydestination\s*=', line: 'mydestination = $myhostname, {{ mail_fqdn }}, {{ mail_hostname }}, localhost'}
+    - {pattern: '^inet_protocols\s*=', line: 'inet_protocols = ipv4'}
+    - {pattern: '^virtual_alias_domains\s*=', line: 'virtual_alias_domains = {{ mail_fqdn }}, {{ mail_hostname }}'}
+    - {pattern: '^virtual_alias_maps\s*=', line: 'virtual_alias_maps = hash:/etc/postfix/virtual'}
+  notify:
+    - restart postfix
+
+- name: set up virtual aliases
+  lineinfile:
+    dest: /etc/postfix/virtual
+    regexp: "{{item.pattern}}"
+    line: "{{item.line}}"
+    state: "present"
+    create: yes
+  with_items:
+    - {pattern: '^postmaster@{{mail_fqdn}}\s*',     line: 'postmaster@{{mail_fqdn}}       {{postfix_delegate}}'}
+    - {pattern: '^root@{{mail_fqdn}}\s*',           line: 'root@{{mail_fqdn}}             {{postfix_delegate}}'}
+    - {pattern: '^ambiesense@{{mail_fqdn}}\s*',     line: 'ambiesense@{{mail_fqdn}}       {{postfix_delegate}}'}
+    - {pattern: '^@{{mail_fqdn}}\s*',               line: '@{{mail_fqdn}}                 {{postfix_delegate}}'}
+    - {pattern: '^postmaster@{{mail_hostname}}\s*', line: 'postmaster@{{mail_hostname}}   {{postfix_delegate}}'}
+    - {pattern: '^root@{{mail_hostname}}\s*',       line: 'root@{{mail_hostname}}         {{postfix_delegate}}'}
+    - {pattern: '^ambiesense@{{mail_hostname}}\s*', line: 'ambiesense@{{mail_hostname}}   {{postfix_delegate}}'}
+    - {pattern: '^@{{mail_hostname}}\s*',           line: '@{{mail_hostname}}             {{postfix_delegate}}'}
+  notify:
+    - rebuild virtual domain
+
+- name: set up forwarding
+  lineinfile:
+    dest: /etc/aliases
+    regexp: "^root:"
+    line: "root: {{postfix_delegate}}, meetomatic@meetomatic.com"
+  notify:
+    - rebuild aliases

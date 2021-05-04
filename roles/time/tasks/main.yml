@@ -1,0 +1,13 @@
+---
+- name: get current time zone
+  command: timedatectl status
+  changed_when: false
+  register: time_status
+
+- name: set time zone if needed
+  command: timedatectl set-timezone America/Toronto
+  when: not ("America/Toronto" in time_status.stdout)
+
+- name: verify ntp is enabled
+  assert: 
+    that: 'time_status.stdout is regex("synchronized:\s+yes")'

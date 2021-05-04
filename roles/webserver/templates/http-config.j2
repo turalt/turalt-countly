@@ -1,0 +1,2 @@
+limit_req_zone $binary_remote_addr zone=ambiesense:5m rate=25r/s;
+limit_req_status 503;

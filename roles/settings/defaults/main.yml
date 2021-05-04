@@ -1,0 +1,7 @@
+---
+system_service_directory: '/etc/systemd/system'
+
+issue_certificates: "{{not running_locally}}"
+
+public_network_interface: 'eth0'
+webapp_domain: 'analytics.turalt.com'
